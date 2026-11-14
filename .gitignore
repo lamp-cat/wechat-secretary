@@ -1,0 +1,32 @@
+# Secrets — never commit
+**/keys*.json
+**/image-key*.json
+**/source-config.json
+**/gateway-token
+**/web-token
+**/ai-config.json
+**/key-capture/
+**/.secrets/
+
+# Python / venv
+**/.venv/
+**/__pycache__/
+*.py[cod]
+
+# Runtime state, snapshots, databases, logs
+**/state/
+**/snapshots/
+**/decrypted/
+**/exports/
+*.db
+*.db-*
+*.sqlite*
+*.wal
+*.shm
+*.journal
+*.log
+
+# Backups / OS cruft
+*.bak
+*.bak-*
+.DS_Store

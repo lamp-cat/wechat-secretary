@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>消息助手 · 伴侣浮窗</title>
+  <link rel="stylesheet" href="/static/sidebar.css?v=3solo" />
+</head>
+<body>
+  <!-- Read-only companion panel. Drafts only: there is no send action anywhere on this page. -->
+  <div id="sb">
+    <header class="sb-top">
+      <strong class="sb-brand">伴侣浮窗</strong>
+      <span id="freshDot" class="dot" title="数据新鲜度"></span>
+      <span class="grow"></span>
+      <button id="followBtn" class="chip follow on" title="跟随：自动切到最近打开的会话；锁定：停在当前会话">● 跟随中</button>
+      <button id="themeBtn" class="icon" title="切换主题">◐</button>
+      <a href="/settings" class="icon" title="应用设置（AI / 令牌）" style="text-decoration:none">⚙</a>
+    </header>
+
+    <section class="picker" id="picker">
+      <input id="chatSearch" type="search" placeholder="选择/搜索会话…" autocomplete="off" />
+      <div id="chatDropdown" class="dropdown hidden"></div>
+    </section>
+    <div id="followHint" class="hint">自动跟随“最近打开的会话”（估计值：只在会话有未读时更新，可能滞后几秒，手机上读消息也会触发）。不准时手动选会话即可锁定。</div>
+
+    <section id="chatHead" class="chat-head empty">
+      <div id="chatAvatar" class="avatar">?</div>
+      <div class="who">
+        <div id="chatName" class="name">未选择会话</div>
+        <div id="chatMeta" class="meta">等待最近打开的会话…</div>
+      </div>
+    </section>
+
+    <main class="sb-body">
+      <section class="card" id="summaryCard">
+        <div class="card-head">
+          <h3>历史总结</h3>
+          <select id="scopeSel" title="总结范围">
+            <option value="n:50">最近 50 条</option>
+            <option value="n:100" selected>最近 100 条</option>
+            <option value="n:200">最近 200 条</option>
+            <option value="d:7">最近 7 天</option>
+            <option value="d:30">最近 30 天</option>
+          </select>
+          <button id="sumBtn" class="btn">总结</button>
+        </div>
+        <div id="summaryBox" class="card-body muted">选择会话后自动总结。</div>
+      </section>
+
+      <section class="card" id="suggestCard">
+        <div class="card-head">
+          <h3>回复建议</h3>
+          <span class="draft-tag">仅草稿</span>
+          <span class="grow"></span>
+          <button id="sugBtn" class="btn">生成</button>
+        </div>
+        <div class="draft-note">复制后请自己粘贴到微信发送 —— 本工具不会、也无法代你发送。</div>
+        <div id="suggestBox" class="card-body muted">选择会话后自动生成。</div>
+      </section>
+
+      <section class="card recent" id="recentCard">
+        <div class="card-head">
+          <h3>最近消息</h3>
+          <span class="grow"></span>
+          <label class="auto"><input type="checkbox" id="autoAI" checked /> 切换时自动跑 AI</label>
+        </div>
+        <div id="recentBox" class="recent-list"></div>
+      </section>
+    </main>
+    <div id="toast" class="toast hidden"></div>
+  </div>
+  <script src="/static/sidebar.js?v=3solo"></script>
+</body>
+</html>

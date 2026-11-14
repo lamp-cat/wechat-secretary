@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>应用设置</title>
+  <link rel="stylesheet" href="/static/settings.css?v=1" />
+</head>
+<body>
+  <!-- Settings only. Receive-only app: there is no send action anywhere. -->
+  <header class="top">
+    <strong>应用设置</strong>
+    <nav>
+      <a href="/sidebar">← 返回浮窗</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="card" id="aiCard">
+      <h2>AI 服务 <span id="aiBadge" class="badge">…</span></h2>
+      <p class="muted">用于「历史总结」和「回复建议」。兼容任意 OpenAI 格式接口。只生成草稿，永远不会自动发送。</p>
+
+      <label class="switch"><input type="checkbox" id="aiEnabled" /> 启用 AI</label>
+
+      <label>服务商预设
+        <select id="preset">
+          <option value="">— 自定义 —</option>
+          <option value="https://api.deepseek.com/v1">DeepSeek</option>
+          <option value="https://api.moonshot.cn/v1">Moonshot / Kimi</option>
+          <option value="https://dashscope.aliyuncs.com/compatible-mode/v1">通义千问 (DashScope)</option>
+          <option value="https://open.bigmodel.cn/api/paas/v4">智谱 GLM</option>
+          <option value="https://api.siliconflow.cn/v1">SiliconFlow 硅基流动</option>
+          <option value="https://ark.cn-beijing.volces.com/api/v3">火山方舟 (豆包)</option>
+          <option value="https://api.x.ai/v1">xAI</option>
+          <option value="https://api.openai.com/v1">OpenAI</option>
+          <option value="https://openrouter.ai/api/v1">OpenRouter</option>
+        </select>
+      </label>
+
+      <label>Base URL
+        <input id="baseUrl" type="url" placeholder="https://api.deepseek.com/v1" autocomplete="off" spellcheck="false" />
+      </label>
+
+      <div class="field">API Key
+        <div class="row">
+          <input id="apiKey" type="password" autocomplete="new-password" spellcheck="false" placeholder="sk-…" />
+          <button type="button" class="btn ghost" id="toggleKey" title="显示/隐藏输入">👁</button>
+        </div>
+        <span class="muted tiny" id="keyHint"></span>
+        <label class="check tiny"><input type="checkbox" id="clearKey" /> 清除已保存的 Key</label>
+      </div>
+
+      <label>模型
+        <div class="row">
+          <select id="modelSelect"><option value="">（先点「获取模型列表」，或在右侧手动输入）</option></select>
+          <input id="modelInput" type="text" placeholder="手动输入模型名" spellcheck="false" />
+        </div>
+      </label>
+      <div class="row btns">
+        <button type="button" class="btn" id="btnModels">获取模型列表</button>
+        <button type="button" class="btn" id="btnTest">测试连接</button>
+      </div>
+      <div id="aiMsg" class="msg"></div>
+
+      <details>
+        <summary>高级</summary>
+        <label>代理（可选，国外服务商在国内通常需要，例如 http://127.0.0.1:7897）
+          <input id="proxy" type="text" placeholder="留空 = 直连" spellcheck="false" />
+        </label>
+        <div class="row">
+          <label>temperature <input id="temperature" type="number" min="0" max="2" step="0.1" /></label>
+          <label>max_tokens <input id="maxTokens" type="number" min="16" max="32000" step="16" /></label>
+        </div>
+      </details>
+
+      <div class="row btns">
+        <button type="button" class="btn primary" id="btnSaveAI">保存 AI 设置</button>
+      </div>
+      <p class="muted tiny">保存到 <code id="aiFile"></code>（权限 0600），立即生效，无需重启。Key 不会回显，也不会写入日志。</p>
+    </section>
+
+    <section class="card" id="authCard">
+      <h2>访问令牌（鉴权）</h2>
+      <p class="warn">令牌 = 完整访问权限（可读取全部消息）。请妥善保管，不要发到群里或截图外传。</p>
+      <div class="row">
+        <input id="tokenView" type="text" readonly value="" />
+        <button type="button" class="btn" id="btnReveal">显示</button>
+        <button type="button" class="btn" id="btnCopy">复制</button>
+      </div>
+      <p class="muted tiny" id="tokenMeta"></p>
+      <div class="row btns">
+        <button type="button" class="btn danger" id="btnRotate">重置令牌</button>
+      </div>
+      <details>
+        <summary>自定义令牌</summary>
+        <div class="row">
+          <input id="customToken" type="password" placeholder="至少 24 位：字母/数字/._~-" autocomplete="new-password" spellcheck="false" />
+          <button type="button" class="btn" id="btnSetToken">设为令牌</button>
+        </div>
+      </details>
+      <p class="muted tiny">重置后本窗口自动保持登录；其它浏览器需重新登录，飞书秒搭等外部调用需把 <code>Authorization: Bearer</code> 换成新令牌。</p>
+      <div id="authMsg" class="msg"></div>
+    </section>
+
+    <section class="card" id="srcCard">
+      <h2>微信数据源 <span id="srcBadge" class="badge">…</span></h2>
+      <dl id="srcList" class="kv"></dl>
+      <div class="row btns">
+        <button type="button" class="btn" id="btnRefreshSrc">刷新状态</button>
+        <button type="button" class="btn" id="btnDoctor">验证密钥</button>
+        <button type="button" class="btn" id="btnRecapture">重新抓取密钥…</button>
+      </div>
+      <div id="srcMsg" class="msg"></div>
+      <pre id="doctorOut" class="out hidden"></pre>
+      <p class="muted tiny">
+        本机已抓取过数据库密钥，日常启动直接复用，不需要再抓。仅当微信升级后「验证密钥」失败时才需要重新抓取：
+        这是一次性的 Frida 步骤，需要先<b>完全退出微信</b>，用一份临时签名的微信副本启动并捕获密钥（不修改正式版微信、不关闭 SIP）。
+        点击后会在「终端」中打开引导脚本，每一步都会让你确认。新电脑上首次使用同样需要走这一步，并非全自动。
+      </p>
+    </section>
+
+    <section class="card">
+      <h2>关于</h2>
+      <p class="muted">只读：本应用只读取本机微信数据库并展示，<b>没有任何发送消息的功能</b>。AI 只生成总结和草稿，需要你自己去微信里回复。</p>
+    </section>
+  </main>
+
+  <script src="/static/settings.js?v=1"></script>
+</body>
+</html>
