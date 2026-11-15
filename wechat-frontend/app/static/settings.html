@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>应用设置</title>
-  <link rel="stylesheet" href="/static/settings.css?v=2" />
+  <link rel="stylesheet" href="/static/settings.css?v=3" />
 </head>
 <body>
   <!-- Settings only. Receive-only app: there is no send action anywhere. -->
@@ -115,8 +115,31 @@
       <p class="muted tiny">
         本机已抓取过数据库密钥，日常启动直接复用，不需要再抓。仅当微信升级后「验证密钥」失败时才需要重新抓取：
         这是一次性的 Frida 步骤，需要先<b>完全退出微信</b>，用一份临时签名的微信副本启动并捕获密钥（不修改正式版微信、不关闭 SIP）。
-        点击后会在「终端」中打开引导脚本，每一步都会让你确认。新电脑上首次使用同样需要走这一步，并非全自动。
+        在应用里点击后，会在应用窗口内一步步引导完成（在浏览器里打开设置页时，则改为在「终端」中打开引导脚本）。新电脑首次启动时应用会自动检测并提示这一步。
       </p>
+    </section>
+
+    <section class="card" id="agentsCard">
+      <h2>Agent 工具接入（MCP） <span id="agBadge" class="badge">…</span></h2>
+      <p class="muted">首次启动时，应用会把只读的微信读取器（<code>wechat-reader mcp</code>）自动登记到本机检测到的 agent 工具里，
+        之后在这些工具里直接就能查询微信消息，<b>不需要你再另外配置</b>。只读，没有发送能力；配置里不含任何令牌。</p>
+      <div id="agList" class="picklist"></div>
+      <div class="row btns">
+        <button type="button" class="btn primary" id="btnAgAll">接入全部已检测到的工具</button>
+        <button type="button" class="btn" id="btnAgRefresh">刷新</button>
+      </div>
+      <div id="agMsg" class="msg"></div>
+      <details>
+        <summary>手动接入 / HTTP 方式</summary>
+        <p class="muted tiny">其他支持 MCP 的工具，可按下面任一方式手动添加：</p>
+        <dl id="mcpInfo" class="kv"></dl>
+        <div class="row btns">
+          <button type="button" class="btn" id="btnCopyStdio">复制 stdio 配置(JSON)</button>
+          <button type="button" class="btn" id="btnCopyReaderTok">复制 HTTP 令牌</button>
+        </div>
+        <p class="warn tiny">HTTP 令牌 = 完整读权限，只在本机使用，不要发给别人。</p>
+      </details>
+      <p class="muted tiny">每次改动前都会先备份原配置文件（<code>~/.config/wechatdesk/backups/</code>）。「撤销」只删除本应用加的那一项，其它配置原样保留，且之后不会再自动加回去。</p>
     </section>
 
     <section class="card" id="archiveCard">
@@ -178,7 +201,8 @@
     </section>
   </main>
 
-  <script src="/static/settings.js?v=1"></script>
+  <script src="/static/settings.js?v=2"></script>
   <script src="/static/settings-archive.js?v=1"></script>
+  <script src="/static/settings-agents.js?v=1"></script>
 </body>
 </html>

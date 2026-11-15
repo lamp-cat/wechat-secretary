@@ -402,14 +402,28 @@ async def keys_doctor():
 
 
 @router.post("/api/keys/recapture")
-async def keys_recapture():
-    """Open Terminal with the guided, interactive Frida key-capture script.
-    It asks for confirmation at every step and never runs unattended."""
-    if not RECAPTURE_SCRIPT.is_file():
+async def keys_recapture(request: Request):
+    """Start the guided Frida key-capture flow.
+    Prefer the App's in-app progress UI (the Settings page posts to wfSetup);
+    when opened in a plain browser, fall back to Terminal with the interactive script."""
+    # Hint for the front-end: if the App bridge is present it should call wfSetup instead.
+    # This endpoint remains for browser / Terminal fallback.
+    gui = Path(os.environ.get("WF_PLATFORM_ROOT", str(HOME / "wechat-platform"))) / "setup" / "capture-gui.sh"
+    # Also look next to the frontend (embedded payload layout).
+    alt = Path(__file__).resolve().parent.parent.parent / "setup" / "capture-gui.sh"
+    script = RECAPTURE_SCRIPT
+    note = "已在“终端”中打开引导脚本，请按提示操作（需要先完全退出微信）。"
+    for cand in (gui, alt, RECAPTURE_SCRIPT):
+        if cand.is_file():
+            script = cand
+            if cand.name == "capture-gui.sh":
+                note = ("已在“终端”中打开应用内抓取脚本。若你是从 App 设置页点的，"
+                        "更推荐关掉这个终端，改用 App 窗口里的进度界面。")
+            break
+    if not script.is_file():
         raise HTTPException(404, "recapture script missing")
     try:
-        subprocess.run(["/usr/bin/open", "-a", "Terminal", str(RECAPTURE_SCRIPT)], timeout=10, check=True)
+        subprocess.run(["/usr/bin/open", "-a", "Terminal", str(script)], timeout=10, check=True)
     except Exception as e:
         raise HTTPException(500, f"无法打开终端：{type(e).__name__}")
-    return {"ok": True, "opened": "Terminal", "script": str(RECAPTURE_SCRIPT),
-            "note": "已在“终端”中打开引导脚本，请按提示操作（需要先完全退出微信）。"}
+    return {"ok": True, "opened": "Terminal", "script": str(script), "note": note}

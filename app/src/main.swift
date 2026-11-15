@@ -1,15 +1,21 @@
-// 消息助手 — native macOS shell for the local, receive-only WeChat helper.
-// - Ensures the launchd-managed backend (wechat-reader serve + FastAPI gateway) is running.
-// - Logs the embedded WebView in with the local gateway token (read from the 0600 file, never logged).
-// - Shows the companion panel (/sidebar, the only UI) and the in-app Settings (/settings).
-// Receive-only: this app has no way to send WeChat messages.
+// 消息工作台 — native macOS shell for the local, receive-only WeChat helper.
+// First launch: auto-locate WeChat data, reuse/acquire keys, start services, register MCP into local agent tools.
+// Receive-only: this app has no way to send WeChat messages. Tokens/keys are never logged.
 import Cocoa
 import WebKit
 
 let HOME = FileManager.default.homeDirectoryForCurrentUser.path
-let PLATFORM_ROOT = UserDefaults.standard.string(forKey: "PlatformRoot") ?? "\(HOME)/wechat-platform"
-let READER_ROOT = "\(PLATFORM_ROOT)/wechat-realtime-reader"
-let FRONTEND_ROOT = "\(PLATFORM_ROOT)/wechat-frontend"
+let BUNDLE = Bundle.main.bundleURL.path
+let PAYLOAD: String = {
+    let candidates = ["\(BUNDLE)/Contents/Resources/payload",
+                      (Bundle.main.resourceURL?.appendingPathComponent("payload").path) ?? ""]
+    for c in candidates where FileManager.default.fileExists(atPath: "\(c)/setup/bootstrap.sh") { return c }
+    // Dev / source-tree fallback: run from the repo that contains this .app's build.
+    let fromDist = (Bundle.main.bundleURL.deletingLastPathComponent().deletingLastPathComponent().path)
+    if FileManager.default.fileExists(atPath: "\(fromDist)/setup/bootstrap.sh") { return fromDist }
+    return candidates[0]
+}()
+let MANAGED_ROOT = "\(HOME)/.local/share/wechatdesk/runtime"
 let TOKEN_FILE = "\(HOME)/.config/wechat-frontend/gateway-token"
 let BASE = "http://127.0.0.1:8088"
 let READER_URL = "http://127.0.0.1:5678/"
@@ -19,79 +25,82 @@ let FRONT_LABEL = "com.gly.wechatfrontend"
 let KEEP_LABEL = "com.gly.wechatkeepalive"
 let UID_STR = String(getuid())
 
+func platformRoot() -> String {
+    if let p = UserDefaults.standard.string(forKey: "PlatformRoot"), !p.isEmpty,
+       FileManager.default.fileExists(atPath: "\(p)/wechat-realtime-reader/bin/wechat-reader") { return p }
+    if FileManager.default.fileExists(atPath: "\(HOME)/wechat-platform/wechat-realtime-reader/bin/wechat-reader") {
+        return "\(HOME)/wechat-platform"
+    }
+    return MANAGED_ROOT
+}
+
 func readToken() -> String {
     (try? String(contentsOfFile: TOKEN_FILE, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 }
 
 @discardableResult
-func run(_ exe: String, _ args: [String]) -> Int32 {
-    let p = Process()
-    p.executableURL = URL(fileURLWithPath: exe)
-    p.arguments = args
-    p.standardOutput = FileHandle.nullDevice
-    p.standardError = FileHandle.nullDevice
+func run(_ exe: String, _ args: [String], env: [String: String]? = nil) -> Int32 {
+    let p = Process(); p.executableURL = URL(fileURLWithPath: exe); p.arguments = args
+    p.standardOutput = FileHandle.nullDevice; p.standardError = FileHandle.nullDevice
+    if let env = env { var e = ProcessInfo.processInfo.environment; e.merge(env) { _, n in n }; p.environment = e }
     do { try p.run() } catch { return -1 }
-    p.waitUntilExit()
-    return p.terminationStatus
+    p.waitUntilExit(); return p.terminationStatus
 }
 
-// MARK: - Backend (launchd) management
 enum Backend {
     static func loaded(_ label: String) -> Bool { run("/bin/launchctl", ["print", "gui/\(UID_STR)/\(label)"]) == 0 }
-    static func plistPath(_ label: String) -> String { "\(LA_DIR)/\(label).plist" }
-
-    /// Generate a LaunchAgent if this machine doesn't have one yet (first run on a fresh install).
-    static func writePlistIfMissing(_ label: String) {
-        let path = plistPath(label)
-        if FileManager.default.fileExists(atPath: path) { return }
-        let env: [String: String] = ["PATH": "/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin", "HOME": HOME]
-        var d: [String: Any] = ["Label": label, "RunAtLoad": true, "KeepAlive": true, "EnvironmentVariables": env]
-        switch label {
-        case READER_LABEL:
-            d["ProgramArguments"] = ["\(READER_ROOT)/bin/wechat-reader", "serve", "-addr", "127.0.0.1:5678"]
-            d["WorkingDirectory"] = READER_ROOT
-            d["StandardOutPath"] = "/tmp/wechat_reader_serve.log"; d["StandardErrorPath"] = "/tmp/wechat_reader_serve.log"
-        case FRONT_LABEL:
-            d["ProgramArguments"] = ["\(FRONTEND_ROOT)/scripts/start.sh"]
-            d["WorkingDirectory"] = FRONTEND_ROOT
-            d["StandardOutPath"] = "/tmp/wechat_frontend.log"; d["StandardErrorPath"] = "/tmp/wechat_frontend.log"
-        default: return
-        }
-        try? FileManager.default.createDirectory(atPath: LA_DIR, withIntermediateDirectories: true)
-        if let data = try? PropertyListSerialization.data(fromPropertyList: d, format: .xml, options: 0) {
-            FileManager.default.createFile(atPath: path, contents: data)
-        }
-    }
-
-    /// Make sure a service is loaded in the user's GUI domain (bootstrap if needed).
-    static func ensure(_ label: String, create: Bool) -> Bool {
-        if loaded(label) { return true }
-        if create { writePlistIfMissing(label) }
-        guard FileManager.default.fileExists(atPath: plistPath(label)) else { return false }
-        run("/bin/launchctl", ["bootstrap", "gui/\(UID_STR)", plistPath(label)])
-        return loaded(label)
-    }
     static func restart(_ label: String) { run("/bin/launchctl", ["kickstart", "-k", "gui/\(UID_STR)/\(label)"]) }
     static func stop(_ label: String) { run("/bin/launchctl", ["bootout", "gui/\(UID_STR)/\(label)"]) }
 }
 
 let session: URLSession = {
     let c = URLSessionConfiguration.ephemeral
-    c.connectionProxyDictionary = [:]          // loopback only: never via the system proxy
+    c.connectionProxyDictionary = [:]
     c.timeoutIntervalForRequest = 4
     return URLSession(configuration: c)
 }()
 
 func httpStatus(_ url: String, token: String? = nil) async -> Int {
-    var req = URLRequest(url: URL(string: url)!)
+    var req = URLRequest(url: URL(string: url)! )
     if let t = token, !t.isEmpty { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
-    do {
-        let (_, resp) = try await session.data(for: req)
-        return (resp as? HTTPURLResponse)?.statusCode ?? 0
-    } catch { return 0 }
+    do { let (_, resp) = try await session.data(for: req); return (resp as? HTTPURLResponse)?.statusCode ?? 0 }
+    catch { return 0 }
 }
 
-// MARK: - App
+/// Streaming runner for bootstrap / capture scripts. Parses @@step / @@need / @@done lines.
+final class ScriptRunner {
+    private var proc: Process?
+    private var pipe: Pipe?
+    var onLine: ((String) -> Void)?
+    var onDone: ((Int32) -> Void)?
+
+    func start(_ exe: String, _ args: [String], env: [String: String]) {
+        let p = Process(); p.executableURL = URL(fileURLWithPath: exe); p.arguments = args
+        var e = ProcessInfo.processInfo.environment; e.merge(env) { _, n in n }; p.environment = e
+        let pipe = Pipe(); p.standardOutput = pipe; p.standardError = pipe
+        self.pipe = pipe; self.proc = p
+        pipe.fileHandleForReading.readabilityHandler = { [weak self] h in
+            let data = h.availableData
+            if data.isEmpty { return }
+            guard let s = String(data: data, encoding: .utf8) else { return }
+            for line in s.split(separator: "\n", omittingEmptySubsequences: false) {
+                let t = String(line)
+                if !t.isEmpty { DispatchQueue.main.async { self?.onLine?(t) } }
+            }
+        }
+        p.terminationHandler = { [weak self] proc in
+            DispatchQueue.main.async {
+                self?.pipe?.fileHandleForReading.readabilityHandler = nil
+                self?.onDone?(proc.terminationStatus)
+            }
+        }
+        do { try p.run() } catch {
+            DispatchQueue.main.async { self.onDone?(-1) }
+        }
+    }
+    func cancel() { proc?.terminate() }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler, NSWindowDelegate {
     var window: NSWindow!
     var web: WKWebView!
@@ -100,68 +109,242 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     var statusItem: NSStatusItem!
     var ready = false
     var pendingPath = "/sidebar"
+    var bootLines: [(id: String, status: String, text: String)] = []
+    var bootNeed: (code: String, text: String)?
+    var bootExtra: [String] = []
+    var runner: ScriptRunner?
+    var mode: String = "boot"   // boot | capture
 
     func makeConfig() -> WKWebViewConfiguration {
         let cfg = WKWebViewConfiguration()
         cfg.websiteDataStore = .default()
         cfg.userContentController.add(self, name: "wfCopy")
+        cfg.userContentController.add(self, name: "wfSetup")
         cfg.preferences.javaScriptCanOpenWindowsAutomatically = false
         return cfg
     }
 
     func applicationDidFinishLaunching(_ n: Notification) {
-        buildMenu()
-        buildStatusItem()
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440, height: 820),
+        buildMenu(); buildStatusItem()
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 720),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-        window.title = "消息助手 · 伴侣浮窗"
-        window.minSize = NSSize(width: 360, height: 480)
+        window.title = "消息工作台"
+        window.minSize = NSSize(width: 400, height: 520)
         window.setFrameAutosaveName("SidebarMainWindow")
         if window.frame.origin == .zero { window.center() }
         window.delegate = self
         web = WKWebView(frame: window.contentView!.bounds, configuration: makeConfig())
         web.autoresizingMask = [.width, .height]
-        web.navigationDelegate = self
-        web.uiDelegate = self
+        web.navigationDelegate = self; web.uiDelegate = self
         window.contentView!.addSubview(web)
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        showLoading(["正在启动后台服务…"])
         Task { await self.boot() }
     }
 
-    // MARK: boot sequence
-    func showLoading(_ lines: [String], error: Bool = false) {
-        let items = lines.map { "<li>\($0)</li>" }.joined()
+    // MARK: progress UI
+    func esc(_ s: String) -> String {
+        s.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;")
+    }
+    func showProgress(title: String, error: Bool = false, actions: [(String, String)] = []) {
+        let items = bootLines.map { row -> String in
+            let icon: String
+            switch row.status {
+            case "ok": icon = "✓"
+            case "warn": icon = "!"
+            case "fail": icon = "✗"
+            case "skip": icon = "–"
+            default: icon = "…"
+            }
+            let color: String
+            switch row.status {
+            case "ok": color = "#07c160"
+            case "warn": color = "#d48806"
+            case "fail": color = "#e5484d"
+            default: color = "#6b7280"
+            }
+            return "<li style=\"color:\(color)\"><b>\(icon)</b> \(esc(row.text))</li>"
+        }.joined()
+        let extra = bootExtra.map { "<p style=\"color:#6b7280;font-size:12px;margin:2px 0\">\(esc($0))</p>" }.joined()
+        var needHTML = ""
+        if let n = bootNeed {
+            needHTML = "<div style=\"margin:16px 0;padding:12px 14px;background:#fff7e6;border:1px solid #ffd591;border-radius:10px\">" +
+                       "<p style=\"margin:0 0 8px;color:#873800\"><b>需要你操作一步</b></p>" +
+                       "<p style=\"margin:0;color:#1d2129\">\(esc(n.text))</p></div>"
+        }
+        let btns = actions.map { a in
+            "<button onclick=\"webkit.messageHandlers.wfSetup.postMessage('\(a.1)')\" " +
+            "style=\"margin:4px 8px 4px 0;padding:8px 16px;border:0;border-radius:8px;background:#07c160;color:#fff;font:14px -apple-system,'PingFang SC';cursor:pointer\">\(esc(a.0))</button>"
+        }.joined()
         let html = """
-        <!doctype html><meta charset="utf-8"><body style="font:15px -apple-system,'PingFang SC';display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f5f6f8;color:#1d2129">
-        <div style="max-width:560px"><h2 style="color:\(error ? "#e5484d" : "#07c160")">消息助手</h2>
-        <ul style="line-height:1.9;padding-left:18px">\(items)</ul>
-        <p style="color:#6b7280;font-size:12px">只读：只读取本机微信数据并展示，没有发送功能。</p></div></body>
+        <!doctype html><meta charset="utf-8"><body style="font:15px -apple-system,'PingFang SC';margin:0;background:#f5f6f8;color:#1d2129">
+        <div style="max-width:640px;margin:40px auto;padding:0 24px">
+          <h2 style="color:\(error ? "#e5484d" : "#07c160")">\(esc(title))</h2>
+          <ul style="line-height:1.9;padding-left:4px;list-style:none">\(items)</ul>
+          \(extra)\(needHTML)
+          <div style="margin-top:12px">\(btns)</div>
+          <p style="color:#6b7280;font-size:12px;margin-top:24px">只读：只读取本机微信数据并展示，没有发送功能。密钥和令牌不会显示。</p>
+        </div></body>
         """
         web.loadHTMLString(html, baseURL: nil)
     }
 
+    func upsertStep(id: String, status: String, text: String) {
+        if let i = bootLines.firstIndex(where: { $0.id == id }) {
+            bootLines[i] = (id, status, text)
+        } else {
+            bootLines.append((id, status, text))
+        }
+    }
+
+    // MARK: boot
     func boot() async {
-        var log: [String] = []
-        let fm = FileManager.default
-        if !fm.fileExists(atPath: "\(READER_ROOT)/bin/wechat-reader") || !fm.fileExists(atPath: "\(FRONTEND_ROOT)/scripts/start.sh") {
-            await MainActor.run { self.showLoading(["找不到后台程序：\(PLATFORM_ROOT)", "请确认 wechat-realtime-reader 与 wechat-frontend 已安装在该目录。"], error: true) }
+        mode = "boot"
+        bootLines = []; bootNeed = nil; bootExtra = []
+        await MainActor.run { self.showProgress(title: "正在准备…") }
+        // Fast path: services already healthy → skip the full bootstrap.
+        let tok = readToken()
+        if !tok.isEmpty {
+            let r = await httpStatus(READER_URL)
+            let h = await httpStatus("\(BASE)/api/health", token: tok)
+            if r > 0 && h == 200 {
+                await MainActor.run {
+                    self.upsertStep(id: "ready", status: "ok", text: "后台服务已就绪")
+                    self.ready = true; self.load(self.pendingPath)
+                }
+                // Soft: keep agent registrations up to date in the background.
+                DispatchQueue.global(qos: .utility).async { self.runAgentsAuto() }
+                return
+            }
+        }
+        await MainActor.run { self.startBootstrap() }
+    }
+
+    func startBootstrap() {
+        mode = "boot"; bootLines = []; bootNeed = nil; bootExtra = []
+        showProgress(title: "首次启动 · 自动配置")
+        let script = "\(PAYLOAD)/setup/bootstrap.sh"
+        guard FileManager.default.isExecutableFile(atPath: script) else {
+            upsertStep(id: "env", status: "fail", text: "安装包不完整：找不到 setup/bootstrap.sh")
+            showProgress(title: "无法启动", error: true, actions: [("重试", "retry")])
             return
         }
-        if !fm.fileExists(atPath: "\(HOME)/.config/wechat-realtime-reader/source-config.json") {
-            log.append("⚠️ 未找到微信数据源配置（~/.config/wechat-realtime-reader/source-config.json），需要先做一次密钥抓取。")
-        } else {
-            log.append("✓ 已找到本机微信数据源配置（自动连接，无需手动选目录）")
+        var env: [String: String] = [
+            "WD_PAYLOAD": PAYLOAD,
+            "WD_HOME": HOME,
+            "WD_ROOT": platformRoot() == MANAGED_ROOT ? MANAGED_ROOT : platformRoot(),
+            "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+        ]
+        // Reuse keys from a previous install on this Mac when possible (same account).
+        let live = "\(HOME)/.config/wechat-realtime-reader"
+        if !FileManager.default.fileExists(atPath: "\(live)/keys.json"),
+           FileManager.default.fileExists(atPath: "\(HOME)/.config/wechat-realtime-reader/keys.json") {
+            // no-op: live IS the default
         }
-        let r = Backend.ensure(READER_LABEL, create: true)
-        let f = Backend.ensure(FRONT_LABEL, create: true)
-        _ = Backend.ensure(KEEP_LABEL, create: false)   // optional WeChat watchdog, only if installed
-        log.append(r ? "✓ 读取服务（wechat-reader）已在 launchd 中运行" : "✗ 读取服务启动失败")
-        log.append(f ? "✓ 网关（FastAPI :8088）已在 launchd 中运行" : "✗ 网关启动失败")
-        let snapshot = log
-        await MainActor.run { self.showLoading(snapshot + ["⏳ 等待服务就绪…"]) }
+        // Prefer importing from the already-running production config when testing under a scratch HOME
+        // is not in play; on a normal machine the live config is what we want.
+        if FileManager.default.fileExists(atPath: "\(live)/keys.json") {
+            env["WD_IMPORT_KEYS_FROM"] = live
+        }
+        let r = ScriptRunner()
+        r.onLine = { [weak self] line in self?.handleBootLine(line) }
+        r.onDone = { [weak self] code in self?.handleBootDone(code) }
+        runner = r
+        r.start("/bin/bash", [script], env: env)
+    }
 
+    func startCapture() {
+        mode = "capture"; bootLines = []; bootNeed = nil; bootExtra = []
+        showProgress(title: "抓取微信数据库密钥")
+        let script = "\(PAYLOAD)/setup/capture-gui.sh"
+        guard FileManager.default.isExecutableFile(atPath: script) else {
+            upsertStep(id: "env", status: "fail", text: "安装包不完整：找不到 setup/capture-gui.sh")
+            showProgress(title: "无法抓取", error: true, actions: [("返回", "retry")])
+            return
+        }
+        let root = platformRoot()
+        let env: [String: String] = [
+            "WD_ROOT": root, "WD_HOME": HOME, "WD_READER_LABEL": READER_LABEL,
+            "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+        ]
+        let r = ScriptRunner(); runner = r
+        r.onLine = { [weak self] line in self?.handleBootLine(line) }
+        r.onDone = { [weak self] code in
+            if code == 0 {
+                self?.upsertStep(id: "done", status: "ok", text: "抓取完成，正在继续启动…")
+                self?.showProgress(title: "密钥就绪")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { self?.startBootstrap() }
+            } else if code == 10 {
+                // need already shown
+            } else {
+                self?.showProgress(title: "抓取未完成", error: true,
+                                   actions: [("重试", "capture"), ("取消，返回启动", "retry")])
+            }
+        }
+        r.start("/bin/bash", [script], env: env)
+    }
+
+    func handleBootLine(_ line: String) {
+        if line.hasPrefix("@@step\t") {
+            let parts = line.split(separator: "\t", maxSplits: 3, omittingEmptySubsequences: false).map(String.init)
+            guard parts.count >= 4 else { return }
+            upsertStep(id: parts[1], status: parts[2], text: parts[3])
+            showProgress(title: mode == "capture" ? "抓取微信数据库密钥" : "首次启动 · 自动配置")
+        } else if line.hasPrefix("@@need\t") {
+            let parts = line.split(separator: "\t", maxSplits: 2, omittingEmptySubsequences: false).map(String.init)
+            guard parts.count >= 3 else { return }
+            bootNeed = (parts[1], parts[2])
+            showProgress(title: mode == "capture" ? "抓取微信数据库密钥" : "首次启动 · 自动配置",
+                         actions: actionsForNeed(parts[1]))
+        } else if line.hasPrefix("@@root\t") {
+            let root = String(line.dropFirst(7))
+            if !root.isEmpty {
+                UserDefaults.standard.set(root, forKey: "PlatformRoot")
+            }
+        } else if line.hasPrefix("@@done\t") {
+            // handled in onDone
+        } else {
+            let t = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !t.isEmpty && !t.contains("token=") && !t.lowercased().contains("bearer ") {
+                bootExtra.append(t)
+                if bootExtra.count > 8 { bootExtra.removeFirst() }
+                showProgress(title: mode == "capture" ? "抓取微信数据库密钥" : "首次启动 · 自动配置")
+            }
+        }
+    }
+
+    func actionsForNeed(_ code: String) -> [(String, String)] {
+        switch code {
+        case "keys", "keys_failed":
+            return [("开始抓取密钥", "capture"), ("稍后重试", "retry")]
+        case "wechat_quit":
+            return [("我已退出，继续", "capture"), ("取消", "retry")]
+        case "data_permission":
+            return [("打开系统设置", "open_fda"), ("在访达中显示读取器", "reveal_reader"), ("我已授权，重试", "retry")]
+        case "clt":
+            return [("安装命令行工具", "install_clt"), ("我已装好，重试", "retry")]
+        case "wechat_missing":
+            return [("打开 App Store 搜索微信", "open_wechat_store"), ("我已安装，重试", "retry")]
+        case "wechat_login":
+            return [("打开微信", "open_wechat"), ("我已登录，重试", "retry")]
+        default:
+            return [("重试", "retry")]
+        }
+    }
+
+    func handleBootDone(_ code: Int32) {
+        if code == 0 {
+            upsertStep(id: "done", status: "ok", text: "配置完成，正在打开界面…")
+            showProgress(title: "就绪")
+            Task { await self.waitReady() }
+        } else if code == 10 {
+            // need already rendered with actions
+        } else {
+            showProgress(title: "启动未完成", error: true, actions: [("重试", "retry")])
+        }
+    }
+
+    func waitReady() async {
         var readerUp = false, health = 0
         for i in 0..<60 {
             if !readerUp { readerUp = await httpStatus(READER_URL) > 0 }
@@ -173,15 +356,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         if health == 200 {
             await MainActor.run { self.ready = true; self.load(self.pendingPath) }
         } else {
-            var lines = snapshot
-            lines.append(readerUp ? "✓ 读取服务已响应" : "✗ 读取服务无响应（看 /tmp/wechat_reader_serve.log；首次可能需要在弹窗里允许访问其他 App 的数据）")
-            lines.append(health == 401 ? "✗ 网关令牌不匹配" : "✗ 网关健康检查失败（HTTP \(health)，看 /tmp/wechat_frontend.log）")
-            lines.append("可在菜单栏图标里选「重启后台服务」后重试。")
-            await MainActor.run { self.showLoading(lines, error: true) }
+            await MainActor.run {
+                self.upsertStep(id: "ready", status: "fail",
+                                text: readerUp ? "网关健康检查失败（HTTP \(health)）" : "读取服务无响应")
+                self.showProgress(title: "服务未就绪", error: true,
+                                  actions: [("重启后台服务", "restart"), ("重试启动", "retry")])
+            }
         }
     }
 
-    /// Install the gateway cookie (HttpOnly, SameSite=Strict) so the WebView is logged in, then navigate.
+    func runAgentsAuto() {
+        let root = platformRoot()
+        let py = "\(root)/wechat-frontend/.venv/bin/python"
+        let reg = "\(root)/wechat-frontend/app/agent_register.py"
+        let bin = "\(root)/wechat-realtime-reader/bin/wechat-reader"
+        guard FileManager.default.isExecutableFile(atPath: py),
+              FileManager.default.fileExists(atPath: reg) else { return }
+        _ = run(py, [reg, "auto", "--bin", bin, "--config-dir", "\(HOME)/.config/wechat-realtime-reader"])
+    }
+
+    // MARK: load UI
     func load(_ path: String, in view: WKWebView? = nil) {
         let target = view ?? web!
         guard ready else { pendingPath = path; return }
@@ -204,14 +398,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         let main = NSMenu()
         let appItem = NSMenuItem(); main.addItem(appItem)
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "关于 消息助手", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: "关于 消息工作台", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "设置…", action: #selector(openSettings), keyEquivalent: ",")
+        appMenu.addItem(withTitle: "重新运行首次配置…", action: #selector(rerunSetup), keyEquivalent: "")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "隐藏 消息助手", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        appMenu.addItem(withTitle: "隐藏 消息工作台", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "退出并停止后台服务", action: #selector(quitAndStop), keyEquivalent: "")
-        appMenu.addItem(withTitle: "退出 消息助手", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: "退出 消息工作台", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
 
         let editItem = NSMenuItem(); main.addItem(editItem)
@@ -247,7 +442,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     func buildStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let b = statusItem.button {
-            if let img = NSImage(systemSymbolName: "bubble.left.and.text.bubble.right", accessibilityDescription: "消息助手") {
+            if let img = NSImage(systemSymbolName: "bubble.left.and.text.bubble.right", accessibilityDescription: "消息工作台") {
                 img.isTemplate = true; b.image = img
             } else { b.title = "微" }
         }
@@ -258,6 +453,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         m.addItem(withTitle: "设置…", action: #selector(openSettings), keyEquivalent: "")
         m.addItem(.separator())
         m.addItem(withTitle: "重启后台服务", action: #selector(restartBackend), keyEquivalent: "")
+        m.addItem(withTitle: "重新运行首次配置…", action: #selector(rerunSetup), keyEquivalent: "")
         m.addItem(.separator())
         m.addItem(withTitle: "退出（后台服务保持运行）", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
         m.addItem(withTitle: "退出并停止后台服务", action: #selector(quitAndStop), keyEquivalent: "")
@@ -269,11 +465,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     @objc func openSidebarInMain() { showMain(); load("/sidebar") }
     @objc func openSettings() { showMain(); load("/settings") }
     @objc func reloadPage() { if ready { web.reload() } else { Task { await boot() } } }
+    @objc func rerunSetup() {
+        ready = false; showMain(); startBootstrap()
+    }
     @objc func restartBackend() {
-        ready = false
-        showMain(); showLoading(["正在重启后台服务…"])
+        ready = false; showMain()
+        bootLines = [(id: "restart", status: "run", text: "正在重启后台服务…")]
+        showProgress(title: "重启中")
         Backend.restart(READER_LABEL); Backend.restart(FRONT_LABEL)
-        Task { try? await Task.sleep(nanoseconds: 1_500_000_000); await self.boot() }
+        Task { try? await Task.sleep(nanoseconds: 1_500_000_000); await self.waitReady() }
     }
     @objc func quitAndStop() {
         let a = NSAlert()
@@ -291,9 +491,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         if panel == nil {
             let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 400, height: 780),
                             styleMask: [.titled, .closable, .resizable, .utilityWindow], backing: .buffered, defer: false)
-            p.title = "伴侣浮窗"
-            p.level = .floating
-            p.isFloatingPanel = true
+            p.title = "伴侣浮窗"; p.level = .floating; p.isFloatingPanel = true
             p.hidesOnDeactivate = false
             p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
             p.setFrameAutosaveName("CompanionPanel")
@@ -310,12 +508,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         if let w = panelWeb { load("/sidebar", in: w) }
     }
 
-    // MARK: window lifecycle — closing the window keeps the app (menubar) alive
     func windowShouldClose(_ sender: NSWindow) -> Bool { sender.orderOut(nil); return false }
     func applicationShouldHandleReopen(_ s: NSApplication, hasVisibleWindows: Bool) -> Bool { showMain(); return true }
     func applicationShouldTerminateAfterLastWindowClosed(_ s: NSApplication) -> Bool { false }
 
-    // MARK: WebView delegates
+    // MARK: WebView + JS bridge
     func isLocal(_ url: URL?) -> Bool {
         guard let u = url else { return true }
         if u.scheme == "about" || u.scheme == "data" || u.scheme == "blob" { return true }
@@ -350,12 +547,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { handleLoadError(webView, error) }
     func handleLoadError(_ v: WKWebView, _ e: Error) {
         if (e as NSError).code == NSURLErrorCancelled { return }
-        if v === web { showLoading(["页面加载失败：\(e.localizedDescription)", "可在菜单栏图标里选「重启后台服务」。"], error: true) }
+        if v === web {
+            bootLines = [(id: "page", status: "fail", text: "页面加载失败：\(e.localizedDescription)")]
+            showProgress(title: "加载失败", error: true, actions: [("重启后台服务", "restart"), ("重试", "retry")])
+        }
     }
-    // Clipboard bridge for the Settings page "复制" button.
+
     func userContentController(_ c: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard message.name == "wfCopy", let s = message.body as? String else { return }
-        NSPasteboard.general.clearContents(); NSPasteboard.general.setString(s, forType: .string)
+        if message.name == "wfCopy", let s = message.body as? String {
+            NSPasteboard.general.clearContents(); NSPasteboard.general.setString(s, forType: .string)
+            return
+        }
+        guard message.name == "wfSetup", let cmd = message.body as? String else { return }
+        switch cmd {
+        case "retry": ready = false; startBootstrap()
+        case "capture": ready = false; startCapture()
+        case "restart": restartBackend()
+        case "open_fda":
+            if let u = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
+                NSWorkspace.shared.open(u)
+            }
+        case "reveal_reader":
+            let bin = "\(platformRoot())/wechat-realtime-reader/bin/wechat-reader"
+            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: bin)])
+        case "install_clt":
+            _ = run("/usr/bin/xcode-select", ["--install"])
+        case "open_wechat":
+            NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/WeChat.app"))
+        case "open_wechat_store":
+            if let u = URL(string: "macappstore://search.itunes.apple.com/WebObjects/MZSearch.woa/wa/search?q=%E5%BE%AE%E4%BF%A1") {
+                NSWorkspace.shared.open(u)
+            }
+        default: break
+        }
     }
 }
 

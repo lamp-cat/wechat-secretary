@@ -17,6 +17,7 @@ from .sidebar import active_chat, summarize_chat
 from .suggest import suggest_replies
 from .config_api import router as config_router
 from .archive import manager as archive_manager, router as archive_router
+from .agents_api import router as agents_router
 
 COOKIE = "wf_gateway"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -27,7 +28,7 @@ log = logging.getLogger("wechat-frontend")
 app = FastAPI(
     title="消息工作台 Gateway",
     description="Receive-only gateway over local wechat-realtime-reader. No send path.",
-    version="1.0.0",
+    version="1.2.0",
     docs_url=None,
     redoc_url=None,
     openapi_url=None,
@@ -171,6 +172,8 @@ async def settings_page(request: Request):
 app.include_router(config_router, dependencies=[Depends(require_auth)])
 # Local message archive (opt-in, default OFF). Token-gated like everything else.
 app.include_router(archive_router, dependencies=[Depends(require_auth)])
+# Agent tools (MCP) auto-registration status / toggle / undo. Token-gated.
+app.include_router(agents_router, dependencies=[Depends(require_auth)])
 
 
 @app.get("/api/health", dependencies=[Depends(require_auth)])

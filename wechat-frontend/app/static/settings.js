@@ -236,6 +236,11 @@
   }
 
   async function recapture() {
+    // Inside the Mac app: hand over to the native guided flow (progress shown in the app window).
+    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.wfSetup) {
+      window.webkit.messageHandlers.wfSetup.postMessage("capture");
+      return;
+    }
     const msg = "重新抓取密钥是一次性的 Frida 步骤：\n\n" +
       "• 需要先完全退出微信（菜单 微信 → 退出）\n" +
       "• 会复制一份临时微信并临时签名后启动、捕获密钥，结束后自动清理进程\n" +

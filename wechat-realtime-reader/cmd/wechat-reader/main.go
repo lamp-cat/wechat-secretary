@@ -39,6 +39,7 @@ Usage:
   wechat-reader status                               show snapshot freshness
   wechat-reader doctor                               verify keys against every database (prints no secrets)
   wechat-reader token  [-addr 127.0.0.1:5678]        print the web/MCP access token and URL
+  wechat-reader detect [-write] [-wxid ID] [-json]   find local WeChat account dirs; -write creates source-config.json
 
 Config: ~/.config/wechat-realtime-reader (override with WECHAT_READER_CONFIG)
 `
@@ -63,6 +64,8 @@ func main() {
 		err = cmdDoctor(args)
 	case "token":
 		err = cmdToken(args)
+	case "detect":
+		err = cmdDetect(args)
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 		return
@@ -274,8 +277,8 @@ func cmdServe(args []string) error {
 		defer c()
 		hs.Shutdown(sctx)
 	}()
-	url := fmt.Sprintf("http://%s/?token=%s", ln.Addr(), token)
-	fmt.Fprintf(os.Stderr, "\n  Web 查看:  %s\n  MCP (HTTP): http://%s/mcp   (Authorization: Bearer <token>)\n\n", url, ln.Addr())
+	// Never print the token: serve output usually ends up in a log file.
+	fmt.Fprintf(os.Stderr, "\n  Web 查看:  http://%s/   (令牌: 运行 `wechat-reader token` 查看)\n  MCP (HTTP): http://%s/mcp   (Authorization: Bearer <token>)\n\n", ln.Addr(), ln.Addr())
 	if err := hs.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
@@ -395,7 +398,12 @@ func cmdDoctor(args []string) error {
 		page := make([]byte, crypto.PageSize)
 		f, err := os.Open(p)
 		if err != nil {
-			fmt.Printf("  %-36s missing\n", n)
+			if errors.Is(err, os.ErrPermission) {
+				fmt.Printf("  %-36s permission denied\n", n)
+				bad++
+			} else {
+				fmt.Printf("  %-36s missing\n", n)
+			}
 			continue
 		}
 		_, err = f.ReadAt(page, 0)

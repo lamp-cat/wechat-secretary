@@ -1,36 +1,36 @@
-# Secrets — never commit
-**/keys*.json
-**/image-key*.json
-**/source-config.json
-**/gateway-token
-**/web-token
-**/ai-config.json
-**/key-capture/
-**/.secrets/
 
+# App build products
+# Backups / OS cruft
+# Message archive (user data / local config, never commit)
 # Python / venv
-**/.venv/
-**/__pycache__/
-*.py[cod]
-
 # Runtime state, snapshots, databases, logs
-**/state/
-**/snapshots/
+# Secrets — never commit
+**/.secrets/
+**/.venv/
+**/MessageArchive/
+**/__pycache__/
+**/ai-config.json
+**/archive-config.json
 **/decrypted/
 **/exports/
-*.db
-*.db-*
-*.sqlite*
-*.wal
-*.shm
-*.journal
-*.log
-
-# Backups / OS cruft
+**/gateway-token
+**/image-key*.json
+**/key-capture/
+**/keys*.json
+**/snapshots/
+**/source-config.json
+**/state/
+**/web-token
 *.bak
 *.bak-*
+*.db
+*.db-*
+*.journal
+*.log
+*.py[cod]
+*.shm
+*.sqlite*
+*.wal
 .DS_Store
-
-# Message archive (user data / local config, never commit)
-**/archive-config.json
-**/MessageArchive/
+app/build/
+app/dist/

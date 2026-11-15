@@ -23,8 +23,8 @@ type Source struct {
 	Wxid         string `json:"wxid"`
 	DBBasePath   string `json:"db_base_path"`
 	VaultDir     string `json:"vault_dir"`
-	DecryptedDir string `json:"decrypted_dir"`
-	ExportsDir   string `json:"exports_dir"`
+	DecryptedDir string `json:"decrypted_dir,omitempty"`
+	ExportsDir   string `json:"exports_dir,omitempty"`
 }
 
 // Config is the fully resolved runtime configuration.
