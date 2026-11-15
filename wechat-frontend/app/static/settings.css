@@ -26,3 +26,6 @@ input[type=text],input[type=url],input[type=password],input[type=number],select{
 .hidden{display:none}details{margin-top:12px}summary{cursor:pointer;color:var(--mut)}
 code{font-size:12px}
 .field{margin:10px 0 0}
+.picklist{margin-top:8px;max-height:260px;overflow:auto;border:1px solid var(--bd);border-radius:8px;padding:4px 8px;background:var(--bg)}
+.picklist label{margin:2px 0;display:flex;align-items:center;gap:8px}.picklist .k{margin-left:auto;font-size:12px;color:var(--mut)}
+input[type=radio]{margin:0}

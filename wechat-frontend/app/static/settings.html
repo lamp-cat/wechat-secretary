@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>应用设置</title>
-  <link rel="stylesheet" href="/static/settings.css?v=1" />
+  <link rel="stylesheet" href="/static/settings.css?v=2" />
 </head>
 <body>
   <!-- Settings only. Receive-only app: there is no send action anywhere. -->
@@ -119,6 +119,59 @@
       </p>
     </section>
 
+    <section class="card" id="archiveCard">
+      <h2>消息归档 <span id="arcBadge" class="badge">…</span></h2>
+      <p class="muted">开启后，自动把消息持续复制到本机一个独立文件夹（SQLite 数据库 + 每个会话一份 Markdown + 附件），
+        供豆包等不能直接读取聊天软件的 AI agent 当作普通资料读取。<b>默认关闭，数据只存本机，不上传。</b></p>
+
+      <label class="switch"><input type="checkbox" id="arcEnabled" /> 启用消息归档</label>
+
+      <div class="field">归档范围
+        <div class="row">
+          <label class="check"><input type="radio" name="arcMode" value="all" /> 全部对话（群聊和私聊，新会话自动纳入）</label>
+          <label class="check"><input type="radio" name="arcMode" value="selected" /> 只归档指定对话</label>
+        </div>
+      </div>
+
+      <div id="arcPicker" class="hidden">
+        <div class="row">
+          <input id="arcSearch" type="text" placeholder="搜索会话名…" spellcheck="false" />
+          <span class="muted tiny" id="arcSelCount"></span>
+        </div>
+        <div id="arcList" class="picklist"></div>
+      </div>
+
+      <label>归档目录（只能在主目录下；修改前需先关闭归档）
+        <input id="arcDir" type="text" spellcheck="false" />
+      </label>
+
+      <details>
+        <summary>高级</summary>
+        <label class="check"><input type="checkbox" id="arcBackfill" /> 首次开启时补全历史消息</label>
+        <label>只补最近 N 天（0 = 全部可用历史）
+          <input id="arcDays" type="number" min="0" max="3650" step="1" />
+        </label>
+        <label class="check"><input type="checkbox" id="arcMedia" /> 复制图片 / 视频 / 语音到附件目录</label>
+        <label>检查新消息间隔（秒）
+          <input id="arcInterval" type="number" min="5" max="3600" step="1" />
+        </label>
+      </details>
+
+      <div class="row btns">
+        <button type="button" class="btn primary" id="btnArcSave">保存归档设置</button>
+        <button type="button" class="btn" id="btnArcSync">立即同步</button>
+        <button type="button" class="btn" id="btnArcRefresh">刷新状态</button>
+      </div>
+      <dl id="arcStatus" class="kv"></dl>
+      <div id="arcMsg" class="msg"></div>
+      <details>
+        <summary>删除归档</summary>
+        <p class="warn">会关闭归档并删除整个归档目录（数据库、Markdown、附件），不可恢复。不影响聊天软件本身的数据。</p>
+        <button type="button" class="btn danger" id="btnArcDelete">删除归档数据…</button>
+      </details>
+      <p class="muted tiny">文件本体（文件消息）无法归档，只记录文件名和大小；原图和视频本体需要先在聊天软件里下载到本机，归档会定期自动补上。</p>
+    </section>
+
     <section class="card">
       <h2>关于</h2>
       <p class="muted">只读：本应用只读取本机微信数据库并展示，<b>没有任何发送消息的功能</b>。AI 只生成总结和草稿，需要你自己去微信里回复。</p>
@@ -126,5 +179,6 @@
   </main>
 
   <script src="/static/settings.js?v=1"></script>
+  <script src="/static/settings-archive.js?v=1"></script>
 </body>
 </html>

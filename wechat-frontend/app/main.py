@@ -16,6 +16,7 @@ from .settings import settings
 from .sidebar import active_chat, summarize_chat
 from .suggest import suggest_replies
 from .config_api import router as config_router
+from .archive import manager as archive_manager, router as archive_router
 
 COOKIE = "wf_gateway"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -75,6 +76,10 @@ async def _startup() -> None:
     if settings.is_non_loopback() and not settings.gateway_token:
         raise RuntimeError("refusing to bind non-loopback without gateway-token")
     await reader.start()
+    try:
+        await archive_manager.start()  # no-op unless the user enabled the archive
+    except Exception as e:
+        log.warning("archive start failed: %s", type(e).__name__)
     log.info(
         "gateway listening intent host=%s port=%s reader=%s non_loopback=%s",
         settings.bind_host,
@@ -86,6 +91,7 @@ async def _startup() -> None:
 
 @app.on_event("shutdown")
 async def _shutdown() -> None:
+    await archive_manager.stop()
     await reader.stop()
 
 
@@ -163,6 +169,8 @@ async def settings_page(request: Request):
 
 # In-app Settings API (AI provider / model / gateway token / data source). All token-gated.
 app.include_router(config_router, dependencies=[Depends(require_auth)])
+# Local message archive (opt-in, default OFF). Token-gated like everything else.
+app.include_router(archive_router, dependencies=[Depends(require_auth)])
 
 
 @app.get("/api/health", dependencies=[Depends(require_auth)])
