@@ -33,7 +33,8 @@ the actual working directory.
 
 ## Tools and limits
 
-- `capture`: hooks only the system CommonCrypto C function, with no dependency on
+- `capture`: uses the bundled official `frida-inject` (`vendor/frida`, sha256-pinned,
+  no pip/network) or an existing Frida; hooks only the system CommonCrypto C function, with no dependency on
   the Objective-C bridge; candidate values are written to a private JSONL and the
   terminal shows only counts. On a hook-load error it does not resume app launch.
 - `pair`: reads the `.db` first page and computes the authentication code without

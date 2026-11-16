@@ -6,7 +6,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 APP_NAME="消息工作台"
 BUNDLE_ID="com.gly.wechatdesk"
-VERSION="${WD_VERSION:-1.2.1}"
+VERSION="${WD_VERSION:-1.2.2}"
 BUILD="build"; DIST="dist"
 APP="$DIST/$APP_NAME.app"
 REPO="$(cd .. && pwd)"
@@ -46,6 +46,15 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </dict></plist>
 PLIST
 
+echo "==> frida-inject (official 17.25.2, sha256-verified; bundled so key capture needs no pip/network)"
+FRIDA_VENDOR="$PAYLOAD_SRC/wechat-realtime-reader/skills/wechat-db-keys/vendor/frida"
+if [[ -n "${WD_FRIDA_XZ_DIR:-}" ]]; then
+  python3 "$FRIDA_VENDOR/fetch.py" --arch all --from "$WD_FRIDA_XZ_DIR"
+else
+  python3 "$FRIDA_VENDOR/fetch.py" --arch all
+fi
+for a in arm64 x86_64; do [[ -x "$FRIDA_VENDOR/frida-inject-$a" ]] || { echo "missing frida-inject-$a"; exit 1; }; done
+
 echo "==> embed payload (reader + frontend + setup)"
 P="$APP/Contents/Resources/payload"
 mkdir -p "$P"
@@ -54,7 +63,8 @@ echo "$VERSION" > "$P/VERSION"
 mkdir -p "$P/wechat-realtime-reader/bin" "$P/wechat-realtime-reader/skills"
 cp "$PAYLOAD_SRC/wechat-realtime-reader/bin/wechat-reader" "$P/wechat-realtime-reader/bin/"
 chmod +x "$P/wechat-realtime-reader/bin/wechat-reader"
-rsync -a --delete "$PAYLOAD_SRC/wechat-realtime-reader/skills/" "$P/wechat-realtime-reader/skills/"
+rsync -a --delete --exclude '__pycache__' --exclude '*.part' --exclude '*.tmp' "$PAYLOAD_SRC/wechat-realtime-reader/skills/" "$P/wechat-realtime-reader/skills/"
+xattr -cr "$P/wechat-realtime-reader/skills/wechat-db-keys/vendor/frida" 2>/dev/null || true
 # frontend: python sources + scripts + requirements (venv is created on first launch)
 mkdir -p "$P/wechat-frontend"
 rsync -a --delete \

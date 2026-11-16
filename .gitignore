@@ -34,3 +34,8 @@
 .DS_Store
 app/build/
 app/dist/
+
+# Frida binaries are fetched/verified at build/setup time, not committed
+**/vendor/frida/frida-inject-*
+**/vendor/frida/*.part
+**/vendor/frida/*.tmp

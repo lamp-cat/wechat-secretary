@@ -58,27 +58,42 @@ while pgrep -f "$APP/Contents/MacOS/WeChat" >/dev/null; do
 done
 echo "微信已退出。"
 
-say "第 3 步：准备临时签名副本 + Frida 环境（不改正式版）"
+say "第 3 步：准备临时签名副本 + 内置 Frida（不改正式版）"
 ask "开始复制并签名临时副本？" || pause_exit 0
 capture_work="$(mktemp -d /private/tmp/wechat-db-keys.XXXXXX)"
 echo "临时目录: $capture_work"
 ditto --noextattr --noqtn "$APP" "$capture_work/WeChat.app" || pause_exit 1
 codesign --force --deep --sign - --entitlements "$SKILL/references/capture-entitlements.plist" "$capture_work/WeChat.app" || pause_exit 1
 codesign --verify --deep --strict "$capture_work/WeChat.app" || pause_exit 1
-python3 -m venv "$capture_work/venv" && "$capture_work/venv/bin/python" -m pip install -q 'frida==17.25.2' || { echo "安装 frida 失败"; pause_exit 1; }
+# Frida：优先用内置的 frida-inject（无需 pip / 联网），其次本机已有的 frida；都没有才从 GitHub 官方 Release 下载并校验
+APP_VENDOR="/Applications/消息工作台.app/Contents/Resources/payload/wechat-realtime-reader/skills/wechat-db-keys/vendor/frida"
+export WD_FRIDA_VENDOR_DIRS="$SKILL/vendor/frida:$HOME/.local/share/wechatdesk/runtime/wechat-realtime-reader/skills/wechat-db-keys/vendor/frida:$APP_VENDOR"
+PY=""
+for c in /usr/bin/python3 /opt/homebrew/bin/python3 /usr/local/bin/python3; do
+  [[ "$c" == /usr/bin/python3 ]] && ! xcode-select -p >/dev/null 2>&1 && continue
+  [[ -x "$c" ]] && "$c" -c 'import sys; sys.exit(sys.version_info < (3, 8))' >/dev/null 2>&1 && { PY="$c"; break; }
+done
+[[ -n "$PY" ]] || { echo "找不到 Python 3.8+"; pause_exit 1; }
+FRIDA_INFO="$("$PY" "$SKILL/scripts/keys.py" frida-check 2>/dev/null | head -1)"
+if [[ -z "$FRIDA_INFO" || "$FRIDA_INFO" == backend=none* ]]; then
+  echo "未找到内置 Frida，从 GitHub 官方 Release 下载 frida-inject（固定 17.25.2，校验 sha256，不走 pip）…"
+  "$PY" "$SKILL/vendor/frida/fetch.py" || { echo "下载 Frida 失败。可改用安装包（.dmg）里内置的版本。"; pause_exit 1; }
+  FRIDA_INFO="$("$PY" "$SKILL/scripts/keys.py" frida-check 2>/dev/null | head -1)"
+fi
+echo "Frida: $(cut -d' ' -f1-3 <<<"$FRIDA_INFO")"
 mkdir -p "$CFG/key-capture"; chmod 700 "$CFG" "$CFG/key-capture"
 
 say "第 4 步：挂监听后启动临时副本（最长 60 秒）"
 echo "看到 Hook ready 后副本会启动。若出现扫码/确认页，请在手机上完成；可以点开几个聊天以触发更多数据库。够了就按 Ctrl-C。"
 ask "开始抓取？" || pause_exit 0
 CAP="$CFG/key-capture/candidates-$TS.jsonl"
-"$capture_work/venv/bin/python" "$SKILL/scripts/keys.py" capture --app "$capture_work/WeChat.app" --seconds 60 --output "$CAP"
+"$PY" "$SKILL/scripts/keys.py" capture --app "$capture_work/WeChat.app" --seconds 60 --output "$CAP"
 cleanup_pids="$(ps -axo pid=,command= | grep -F "$capture_work/WeChat.app/" | grep -v grep | awk '{print $1}')"
 [[ -n "$cleanup_pids" ]] && kill -TERM $cleanup_pids 2>/dev/null
 
 say "第 5 步：离线配对（首页 HMAC-SHA512 校验，只输出数量）"
 NEW="$CFG/keys-new-$TS.json"
-"$capture_work/venv/bin/python" "$SKILL/scripts/keys.py" pair --capture "$CAP" --db-root "$DB_ROOT" --output "$NEW" || { echo "配对失败，保留原 keys.json 不变。"; pause_exit 1; }
+"$PY" "$SKILL/scripts/keys.py" pair --capture "$CAP" --db-root "$DB_ROOT" --output "$NEW" || { echo "配对失败，保留原 keys.json 不变。"; pause_exit 1; }
 
 say "第 6 步：合并到 keys.json（先备份）"
 ask "备份并合并新密钥？" || pause_exit 0

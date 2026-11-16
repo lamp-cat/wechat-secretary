@@ -69,8 +69,10 @@ codesign --force --deep --sign - \
   "$capture_work/WeChat.app"
 codesign --verify --deep --strict "$capture_work/WeChat.app"
 
-python3 -m venv "$capture_work/venv"
-"$capture_work/venv/bin/python" -m pip install 'frida==17.25.2'
+# Frida: the bundled official frida-inject (vendor/frida) is used; no venv/pip needed.
+# From a source checkout without the binary, fetch it once (GitHub release, sha256-pinned):
+python3 skills/wechat-db-keys/vendor/frida/fetch.py
+python3 skills/wechat-db-keys/scripts/keys.py frida-check   # prints backend only, no secrets
 mkdir -p ~/.config/wechat-realtime-reader/key-capture
 chmod 700 ~/.config/wechat-realtime-reader ~/.config/wechat-realtime-reader/key-capture
 ```
@@ -91,11 +93,16 @@ day-to-day way of running.
 Do not double-click the copy, and do not launch first and attach later. Run:
 
 ```bash
-"$capture_work/venv/bin/python" skills/wechat-db-keys/scripts/keys.py capture \
+python3 skills/wechat-db-keys/scripts/keys.py capture \
   --app "$capture_work/WeChat.app" \
   --seconds 30 \
   --output ~/.config/wechat-realtime-reader/key-capture/candidates-new.jsonl
 ```
+
+Backend `auto` (default) prefers the bundled `frida-inject` (spawn with `-f`, hook
+loaded before resume, one flushed JSON line per record read only by keys.py), then
+an existing `frida-inject` on PATH or the Python `frida` module. Force one with
+`--backend inject|python` or `--frida-inject PATH`.
 
 The script's order is suspend launch, attach, load the hook, receive `ready`,
 resume launch. It resumes the app only after the terminal shows `Hook ready`.
@@ -126,7 +133,7 @@ Replace the account-directory placeholder below; do not use this example's liter
 value:
 
 ```bash
-"$capture_work/venv/bin/python" skills/wechat-db-keys/scripts/keys.py pair \
+python3 skills/wechat-db-keys/scripts/keys.py pair \
   --capture ~/.config/wechat-realtime-reader/key-capture/candidates-new.jsonl \
   --db-root "$HOME/Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/<account-dir>/db_storage" \
   --output ~/.config/wechat-realtime-reader/keys-new.json
@@ -203,7 +210,7 @@ reopen the official WeChat; day-to-day `serve`/`mcp` does not load Frida.
 
 After confirming all processes under the temporary directory have exited, move
 **the exact directory** shown by the terminal variable `capture_work` to the
-Trash; what is deleted is the temporary app and venv. Do not bulk-clean with vague
+Trash; what is deleted is the temporary app copy. Do not bulk-clean with vague
 wildcards, and do not delete the official app or account data.
 
 This project's user has asked to keep all key-related material: keep `keys.json`,

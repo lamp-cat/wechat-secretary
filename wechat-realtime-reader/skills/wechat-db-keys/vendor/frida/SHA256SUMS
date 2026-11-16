@@ -1,0 +1,6 @@
+# Frida 17.25.2 official release assets (https://github.com/frida/frida/releases/tag/17.25.2)
+# <sha256>  <file>   — .xz = release asset digest; plain = decompressed binary
+dca9e6dbd043f2f1f187ca03c6f8bcba7d00e77cfbc03a82a5ee582e3a0e9948  frida-inject-17.25.2-macos-arm64.xz
+a10ae6ec44fd4fc410006e1d535b9ad2f1516970a6e140eaf74acd068f44f92a  frida-inject-17.25.2-macos-x86_64.xz
+e6f3c618a7a1d24e9640d543e1e893dcb3c9cb28d469e393039aed7ca1dfb177  frida-inject-arm64
+d5e4abfb55cbc9560a45fd30cff97d93e2c262550c460a6141a9982984969ba0  frida-inject-x86_64

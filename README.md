@@ -29,7 +29,7 @@
 2. 双击打开「消息工作台」。
 3. **首次启动会自动完成**：
    - 查找本机微信 4.x 账号数据目录并写入配置；
-   - 复用已有密钥，或在窗口里引导你抓取一次（临时签名副本 + Frida，不改正式版微信、不关 SIP）；
+   - 复用已有密钥，或在窗口里引导你抓取一次（临时签名副本 + **安装包内置的 Frida**，无需联网安装，不改正式版微信、不关 SIP）；
    - 生成网关令牌（0600）、创建 Python 环境、用 launchd 保活读取器（`127.0.0.1:5678`）与网关（`127.0.0.1:8088`）；
    - 把只读 MCP 读取器自动登记到本机检测到的 agent 工具（Codex / Claude Desktop / Claude Code / Cursor / VS Code）。配置里只写命令路径，**不含任何令牌**。
 
@@ -94,3 +94,6 @@ wechat-realtime-reader/bin/wechat-reader token            # 查看访问令牌�
 - 单账号；只读、只收，**没有发送路径**。
 - `wxgf` 原图需 `ffmpeg`（`brew install ffmpeg`），否则回退缩略图。
 - 远程查看不在本项目范围（可自行用跳板/中转实现）。
+
+## 第三方组件
+- [Frida](https://frida.re)（`frida-inject` 17.25.2，wxWindows Library Licence 3.1）：仅用于抓密钥时挂接临时微信副本。安装包内置官方二进制（未修改），来源、校验值与许可证见 `wechat-realtime-reader/skills/wechat-db-keys/vendor/frida/`。从源码使用时运行 `python3 wechat-realtime-reader/skills/wechat-db-keys/vendor/frida/fetch.py` 获取。

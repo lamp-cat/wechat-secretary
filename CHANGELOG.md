@@ -1,6 +1,28 @@
 # 更新日志
 
-## v1.2.1 — 2026-11-16
+## v1.2.2 — 2026-11-16
+
+修复：抓密钥时「安装 Frida 失败」。安装包现在**内置 Frida**，抓密钥不再需要联网 `pip install`。
+
+### 原因
+- 旧流程在抓密钥时现场 `python3 -m venv` + `pip install frida`。在开着本地代理（如 127.0.0.1:7890）且系统 Python/pip 较旧（例如 Python 3.8 + pip 21.1）的 Mac 上，pip 连 PyPI 会出现 `SSLEOFError`，导致 Frida 装不上、抓密钥直接失败。
+
+### 改动
+- `.dmg` 内置 Frida 官方独立工具 `frida-inject` 17.25.2（Apple Silicon 与 Intel 各一份），构建时从 Frida 官方 GitHub Release 下载并逐个校验 sha256（`.xz` 校验值与官方 Release 一致，解压后的二进制另行校验）。二进制保持官方签名，不做修改。
+- 抓密钥改为「内置 `frida-inject` + 内置 hook 脚本」：只需要系统自带的 Python 标准库，不建虚拟环境、不走 pip、不连 PyPI，断网也能完成。
+- 查找顺序：内置 `frida-inject` → 本机已有的 `frida-inject` 或 Python `frida` 模块 → 最后才尝试从 GitHub 官方 Release 下载（同样校验 sha256，不走 pip）。
+- 内置二进制若带有下载隔离标记会自动清除；首次运行时 macOS 会做一次安全扫描，可能需要一两分钟，界面会提示。
+- 抓取失败时区分「没有权限挂接」「无法启动临时副本」「临时副本崩溃」等原因，不再笼统提示联网问题。
+- 新增 `keys.py frida-check`（只报告将使用哪种 Frida，不输出任何密钥）。
+- 第三方许可：Frida 采用 wxWindows Library Licence 3.1，允许以目标码形式再分发；许可证全文与来源说明见 `wechat-realtime-reader/skills/wechat-db-keys/vendor/frida/`。Frida 二进制体积较大，不放进 git，只随安装包分发；从源码使用时运行该目录下的 `fetch.py` 获取。
+- 安全约束不变：只对临时签名的微信副本挂监听，不改正式版微信及其签名，不关 SIP；密钥只写入 `~/.config/wechat-realtime-reader`（0600），终端和日志只显示数量。
+
+### 同时包含 v1.2.1 的修复
+- v1.2.1 的代码已在主分支，但没有单独发布安装包，统一并入本版本（见下方 v1.2.1 条目）。
+
+---
+
+## v1.2.1 — 2026-11-16（未单独发布，并入 v1.2.2）
 
 修复：在装过旧版（如 v1.1.0 源码目录）的 Mac 上，首次启动卡在「查找微信账号数据目录 / 还没找到微信账号数据」。
 

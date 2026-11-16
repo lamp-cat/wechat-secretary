@@ -9,6 +9,12 @@ ROOT="${WD_ROOT:-$HOME/.local/share/wechatdesk/runtime}"
 CFG="$HOME/.config/wechat-realtime-reader"
 BIN="$ROOT/wechat-realtime-reader/bin/wechat-reader"
 SKILL="$ROOT/wechat-realtime-reader/skills/wechat-db-keys"
+# Prefer the skill shipped next to this script (app payload): it carries the bundled frida-inject
+# and the newest keys.py even when ROOT is an older external install.
+HERE="$(cd "$(dirname "$0")" && pwd)"
+PSKILL="$HERE/../wechat-realtime-reader/skills/wechat-db-keys"
+[[ -f "$PSKILL/scripts/keys.py" ]] && SKILL="$(cd "$PSKILL" && pwd)"
+export WD_FRIDA_VENDOR_DIRS="$SKILL/vendor/frida:$ROOT/wechat-realtime-reader/skills/wechat-db-keys/vendor/frida"
 APP="${WD_WECHAT_APP:-/Applications/WeChat.app}"
 UIDN="$(id -u)"
 TS="$(date +%Y%m%d-%H%M%S)"
@@ -38,7 +44,14 @@ trap cleanup EXIT
 [[ -x "${BIN}" ]] || fail env "找不到读取器：${BIN}"
 [[ -f "${SKILL}/scripts/keys.py" ]] || fail env "缺少抓密钥脚本"
 [[ -f "${CFG}/source-config.json" ]] || need wechat_login "还没有账号配置。请先完成首次启动。"
-DB_ROOT="$(python3 -c "import json,os;print(os.path.expanduser(json.load(open('$CFG/source-config.json'))['db_base_path']))")"
+# stdlib-only Python is enough now (no pip): prefer the gateway venv, then system python3
+PY=""
+for c in "$ROOT/wechat-frontend/.venv/bin/python" /usr/bin/python3 /opt/homebrew/bin/python3 /usr/local/bin/python3; do
+  [[ "$c" == /usr/bin/python3 ]] && ! xcode-select -p >/dev/null 2>&1 && continue
+  [[ -x "$c" ]] && "$c" -c 'import sys; sys.exit(sys.version_info < (3, 8))' >/dev/null 2>&1 && { PY="$c"; break; }
+done
+[[ -n "$PY" ]] || fail env "找不到可用的 Python 3.8+（请先完成首次启动）"
+DB_ROOT="$("$PY" -c "import json,os;print(os.path.expanduser(json.load(open('$CFG/source-config.json'))['db_base_path']))")"
 [[ -d "${DB_ROOT}" ]] || need wechat_login "微信数据目录不存在。请登录微信一次后再试。"
 
 step quit run "检查微信是否已退出"
@@ -52,36 +65,52 @@ if pgrep -f "$APP/Contents/MacOS/WeChat" >/dev/null; then
 fi
 step quit ok "微信已退出"
 
-step prep run "准备临时签名副本与 Frida（不改正式版微信）"
+step prep run "检查内置 Frida（无需联网安装；首次校验可能要一两分钟）"
+FRIDA_INFO="$("$PY" "$SKILL/scripts/keys.py" frida-check 2>/dev/null | head -1)"
+if [[ "$FRIDA_INFO" == backend=none* || -z "$FRIDA_INFO" ]]; then
+  step prep warn "未找到内置 Frida，尝试从 GitHub 官方 Release 下载（校验 sha256，不走 pip）"
+  "$PY" "$SKILL/vendor/frida/fetch.py" --dest "$ROOT/wechat-realtime-reader/skills/wechat-db-keys/vendor/frida" >/dev/null 2>&1 || true
+  FRIDA_INFO="$("$PY" "$SKILL/scripts/keys.py" frida-check 2>/dev/null | head -1)"
+  [[ "$FRIDA_INFO" == backend=none* || -z "$FRIDA_INFO" ]] && fail prep "安装包里缺少 Frida 组件，且无法下载。请重新下载完整的安装包（.dmg）后重试。"
+fi
+case "$FRIDA_INFO" in
+  *source=bundled*) step prep ok "使用内置 Frida（$(sed -E 's/.*version=([^ ]+).*/\1/' <<<"$FRIDA_INFO")）" ;;
+  *) step prep ok "使用本机已有 Frida：$(cut -d' ' -f1-3 <<<"$FRIDA_INFO")" ;;
+esac
+step prep run "准备临时签名副本（不改正式版微信）"
 capture_work="$(mktemp -d /private/tmp/wechat-db-keys.XXXXXX)"
 echo "临时目录：${capture_work}"
 ditto --noextattr --noqtn "${APP}" "${capture_work}/WeChat.app" || fail prep "复制微信失败"
 codesign --force --deep --sign - --entitlements "${SKILL}/references/capture-entitlements.plist" "${capture_work}/WeChat.app" || fail prep "临时签名失败"
 codesign --verify --deep --strict "${capture_work}/WeChat.app" || fail prep "签名校验失败"
-step prep run "安装 Frida（首次约 1 分钟，需要联网）"
-python3 -m venv "${capture_work}/venv" || fail prep "创建虚拟环境失败"
-"$capture_work/venv/bin/python" -m pip install --disable-pip-version-check -q 'frida==17.25.2' 2>&1 | grep -E '^(Collecting|Successfully|ERROR)' || true
-"${capture_work}/venv/bin/python" -c 'import frida' 2>/dev/null || fail prep "安装 Frida 失败（请检查网络后重试）"
 mkdir -p "$CFG/key-capture"; chmod 700 "$CFG" "$CFG/key-capture"
 step prep ok "临时副本与 Frida 就绪"
 
 step capture run "挂监听并启动临时微信（最长 60 秒；出现扫码页请在手机上确认）"
 CAP="$CFG/key-capture/candidates-$TS.jsonl"
-"$capture_work/venv/bin/python" "$SKILL/scripts/keys.py" capture --app "$capture_work/WeChat.app" --seconds 60 --output "$CAP" || true
+"$PY" "$SKILL/scripts/keys.py" capture --app "$capture_work/WeChat.app" --seconds 60 --output "$CAP" 2>"$CFG/key-capture/capture-$TS.err"; crc=$?
+chmod 600 "$CFG/key-capture/capture-$TS.err" 2>/dev/null
 pids="$(ps -axo pid=,command= | grep -F "$capture_work/WeChat.app/" | grep -v grep | awk '{print $1}')"
 [[ -n "$pids" ]] && kill -TERM $pids 2>/dev/null
 count=0; [[ -f "$CAP" ]] && count="$(wc -l < "$CAP" | tr -d ' ')"
-[[ "${count}" -gt 0 ]] || fail capture "没有捕获到候选密钥。请确认临时微信曾真正登录过（可点开几个聊天），然后重试。"
+if [[ "${count}" -eq 0 ]]; then
+  if grep -q '\[permission\]' "$CFG/key-capture/capture-$TS.err" 2>/dev/null; then
+    fail capture "Frida 没有权限挂到临时微信上。若系统弹出「开发者工具」授权请点允许，然后重试。"
+  elif [[ $crc -ne 0 ]]; then
+    fail capture "抓取过程出错（$(grep -o 'Operation failed.*' "$CFG/key-capture/capture-$TS.err" | head -1 | cut -c1-160)）。"
+  fi
+  fail capture "没有捕获到候选密钥。请确认临时微信曾真正登录过（可点开几个聊天），然后重试。"
+fi
 step capture ok "捕获到 ${count} 条候选（内容未显示）"
 
 step pair run "离线配对（HMAC 校验，只输出数量）"
 NEW="$CFG/keys-new-$TS.json"
-"${capture_work}/venv/bin/python" "${SKILL}/scripts/keys.py" pair --capture "${CAP}" --db-root "${DB_ROOT}" --output "${NEW}" || fail pair "配对失败，原 keys.json 未改动。"
+"$PY" "${SKILL}/scripts/keys.py" pair --capture "${CAP}" --db-root "${DB_ROOT}" --output "${NEW}" || fail pair "配对失败，原 keys.json 未改动。"
 step pair ok "配对完成"
 
 step merge run "合并到 keys.json（先备份）"
 [[ -f "$CFG/keys.json" ]] && cp -p "$CFG/keys.json" "$CFG/keys.json.bak-$TS" && chmod 600 "$CFG/keys.json.bak-$TS"
-python3 - "$CFG/keys.json" "$NEW" <<'PY'
+"$PY" - "$CFG/keys.json" "$NEW" <<'PY'
 import json, os, sys, tempfile
 old_p, new_p = sys.argv[1], sys.argv[2]
 old = json.load(open(old_p)) if os.path.isfile(old_p) else {}
