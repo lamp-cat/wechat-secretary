@@ -204,7 +204,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         await MainActor.run { self.showProgress(title: "正在准备…") }
         // Fast path: services already healthy → skip the full bootstrap.
         let tok = readToken()
-        if !tok.isEmpty {
+        // Only take the fast path when the install in use is current (has the agent/MCP module);
+        // an older install (e.g. v1.1.x source clone) goes through bootstrap, which switches to the bundled runtime.
+        let current = FileManager.default.fileExists(atPath: "\(platformRoot())/wechat-frontend/app/agent_register.py")
+        if !tok.isEmpty && current {
             let r = await httpStatus(READER_URL)
             let h = await httpStatus("\(BASE)/api/health", token: tok)
             if r > 0 && h == 200 {

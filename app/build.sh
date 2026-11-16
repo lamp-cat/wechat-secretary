@@ -6,7 +6,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 APP_NAME="消息工作台"
 BUNDLE_ID="com.gly.wechatdesk"
-VERSION="${WD_VERSION:-1.2.0}"
+VERSION="${WD_VERSION:-1.2.1}"
 BUILD="build"; DIST="dist"
 APP="$DIST/$APP_NAME.app"
 REPO="$(cd .. && pwd)"
